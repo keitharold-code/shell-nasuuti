@@ -161,6 +161,13 @@ create trigger price_sets_set_created_by
 -- write policy (see RLS below). record_key is the primary key as text.
 -- ---------------------------------------------------------------------------
 
+-- Field access on NEW/OLD (e.g. new.trading_date) is resolved against the
+-- ACTUAL composite type bound at runtime for every branch of a CASE
+-- expression, not just the branch that ends up taken — so a direct
+-- `new.trading_date` reference blows up the moment this function fires on
+-- `settings`, which has no such column, even though that branch is never
+-- meant to run for that table. Going through jsonb sidesteps this: `->>`
+-- on a jsonb object simply returns null for a key that isn't there.
 create function audit_row()
 returns trigger
 language plpgsql
@@ -169,36 +176,26 @@ set search_path = public
 as $$
 declare
   key text;
+  new_json jsonb;
+  old_json jsonb;
 begin
+  new_json := to_jsonb(new);
+  old_json := to_jsonb(old);
+  key := coalesce(
+    (new_json ->> 'trading_date'), (old_json ->> 'trading_date'),
+    (new_json ->> 'id'), (old_json ->> 'id')
+  );
   if tg_op = 'DELETE' then
-    key := case tg_table_name
-      when 'daily_entries' then old.trading_date::text
-      when 'price_sets' then old.id::text
-      when 'settings' then old.id::text
-      else old.id::text
-    end;
     insert into audit_log (table_name, record_key, action, old_data, changed_by)
-    values (tg_table_name, key, 'delete', to_jsonb(old), auth.uid());
+    values (tg_table_name, key, 'delete', old_json, auth.uid());
     return old;
   elsif tg_op = 'UPDATE' then
-    key := case tg_table_name
-      when 'daily_entries' then new.trading_date::text
-      when 'price_sets' then new.id::text
-      when 'settings' then new.id::text
-      else new.id::text
-    end;
     insert into audit_log (table_name, record_key, action, old_data, new_data, changed_by)
-    values (tg_table_name, key, 'update', to_jsonb(old), to_jsonb(new), auth.uid());
+    values (tg_table_name, key, 'update', old_json, new_json, auth.uid());
     return new;
   else
-    key := case tg_table_name
-      when 'daily_entries' then new.trading_date::text
-      when 'price_sets' then new.id::text
-      when 'settings' then new.id::text
-      else new.id::text
-    end;
     insert into audit_log (table_name, record_key, action, new_data, changed_by)
-    values (tg_table_name, key, 'insert', to_jsonb(new), auth.uid());
+    values (tg_table_name, key, 'insert', new_json, auth.uid());
     return new;
   end if;
 end;
