@@ -6,9 +6,9 @@ import { saveEntry, deleteEntry } from "../lib/data.js";
 import { toast } from "../lib/toast.js";
 
 const flat = [
-  "forecourt", "shop", "lpg", "lubes",
+  "shop", "lpg", "lubes",
   "payCash", "payMomo", "payShell", "payVisa", "payCredit",
-  "bankCente", "bankExim", "expenses",
+  "forecourtCashDrop", "bankCente", "bankExim", "expenses",
 ];
 
 let dirty = false;
@@ -83,13 +83,13 @@ function buildForm(root) {
         </section>
 
         <section class="block">
-          <h2>Sales value <small>UGX</small></h2>
-          <div class="grid4">
-            <label class="f">Forecourt sales<input type="number" step="any" min="0" inputmode="decimal" id="forecourt"></label>
+          <h2>Non-fuel sales value <small>UGX</small></h2>
+          <div class="grid3">
             <label class="f">Shop<input type="number" step="any" min="0" inputmode="decimal" id="shop"></label>
             <label class="f">LPG<input type="number" step="any" min="0" inputmode="decimal" id="lpg"></label>
             <label class="f">Lubes<input type="number" step="any" min="0" inputmode="decimal" id="lubes"></label>
           </div>
+          <p class="hint">Fuel sales aren't entered here — they're calculated from litres sold × the pump price in force.</p>
         </section>
 
         <section class="block">
@@ -101,6 +101,14 @@ function buildForm(root) {
             <label class="f">Visa<input type="number" step="any" min="0" inputmode="decimal" id="payVisa"></label>
             <label class="f">Credit (debtors)<input type="number" step="any" min="0" inputmode="decimal" id="payCredit"></label>
           </div>
+        </section>
+
+        <section class="block">
+          <h2>Cash drop <small>UGX · optional</small></h2>
+          <label class="f">Forecourt cash physically dropped
+            <input type="number" step="any" min="0" inputmode="decimal" id="forecourtCashDrop">
+          </label>
+          <p class="hint">Compared against cash expected (fuel sales minus mobile money, Shell Card, Visa and credit) — not against total sales.</p>
         </section>
 
         <section class="block">
@@ -213,10 +221,11 @@ function renderCalc(root) {
         ugx(r.fuel[k].value)
       );
     });
-    c += kv("Expected forecourt sales", ugx(r.fuelExpected));
-    c += kv("Declared forecourt sales", has(e.forecourt) ? ugx(r.declared) : "—");
-    if (has(e.forecourt)) {
-      const v = r.forecourtVar;
+    c += kv("Forecourt sales (litres × price)", ugx(r.fuelExpected));
+    if (r.paidEntered) c += kv("Cash expected (sales − electronic payments)", ugx(r.cashExpected));
+    c += kv("Cash drop declared", r.cashDropEntered ? ugx(r.cashDrop) : "—");
+    if (r.cashDropEntered) {
+      const v = r.cashOverShort;
       c += kv(v < 0 ? "Shortage" : "Over", sgn(v, ugx), v < -1 ? "neg" : v > 1 ? "pos" : "");
     }
   }

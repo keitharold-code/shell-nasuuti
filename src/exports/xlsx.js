@@ -21,9 +21,10 @@ export function exportXlsx(rows, settings, from, to) {
     ["Fuel GP (UGX)", Math.round(T.fuelGP)],
     ["Non-fuel GP (UGX)", Math.round(T.nfGP)],
     ["Total sales (UGX)", Math.round(T.totalSales)],
-    ["Forecourt sales declared (UGX)", Math.round(T.declared)],
-    ["Forecourt sales expected (UGX)", Math.round(T.fuelExpected)],
-    ["Cash over/short (UGX)", Math.round(T.forecourtVar)],
+    ["Forecourt sales — litres × price (UGX)", Math.round(T.fuelExpected)],
+    ["Cash expected — sales minus electronic payments (UGX)", Math.round(T.cashExpected)],
+    ["Cash drop declared (UGX)", Math.round(T.cashDrop)],
+    ["Cash over/short (UGX)", Math.round(T.cashOverShort)],
     [],
     ["Product", "Litres sold", "Stock variance (L)"],
     ...PRODUCTS.map(({ k, label }) => [label, +T[k].toFixed(2), +T.stockVar[k].toFixed(2)]),
@@ -54,13 +55,14 @@ export function exportXlsx(rows, settings, from, to) {
   const detail = [
     [
       "Date", "PMS dip", "AGO dip", "V-Power dip", "PMS delivered", "AGO delivered", "V-Power delivered",
-      "Cash", "Mobile money", "Shell Card", "Visa", "Credit", "Banked Centenary", "Banked Exim", "Expenses", "Notes",
+      "Cash", "Mobile money", "Shell Card", "Visa", "Credit", "Cash drop",
+      "Banked Centenary", "Banked Exim", "Expenses", "Notes",
     ],
     ...rows.map(({ d, e }) =>
       [
         dmy(d), e.dips.PMS, e.dips.AGO, e.dips.VP,
         e.deliv && e.deliv.PMS, e.deliv && e.deliv.AGO, e.deliv && e.deliv.VP,
-        e.payCash, e.payMomo, e.payShell, e.payVisa, e.payCredit,
+        e.payCash, e.payMomo, e.payShell, e.payVisa, e.payCredit, e.forecourtCashDrop,
         e.bankCente, e.bankExim, e.expenses, e.notes || "",
       ].map((v) => (v == null ? "" : v))
     ),
@@ -95,7 +97,7 @@ export function exportXlsx(rows, settings, from, to) {
   };
   add(summary, "Summary", [34, 18, 18]);
   add(daily, "Daily", COLS.map((c, i) => (i === 0 ? 12 : 15)));
-  add(detail, "Dips & cash", Array(16).fill(14));
+  add(detail, "Dips & cash", Array(17).fill(14));
   add(stock, "Stock check", [12, 12, 40, 10, 12, 14, 14, 12, 12, 18, 14]);
   add(prices, "Prices", Array(7).fill(15));
 

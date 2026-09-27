@@ -73,7 +73,7 @@ function refresh(root) {
     ["Non-fuel GP", ugx(T.nfGP)],
     ["Litres sold", lit(T.litres)],
     ["Total sales", ugx(T.totalSales)],
-    ["Cash over/short", sgn(T.forecourtVar, ugx)],
+    ["Cash over/short", sgn(T.cashOverShort, ugx)],
     ["Stock discrepancies flagged", String(D.length)],
   ];
   $(root, "kpis").innerHTML = kp

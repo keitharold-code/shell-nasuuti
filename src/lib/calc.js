@@ -1,13 +1,18 @@
-// Calculation engine — ported unchanged in behaviour from the prototype
-// (nasuuti-daily-gp.html). Do not "improve" the logic here without also
-// updating the acceptance tests in BUILD_BRIEF.md section 10; this file is
-// the reference implementation the brief points to.
+// Calculation engine — ported from the prototype (nasuuti-daily-gp.html)
+// per BUILD_BRIEF.md section 5, with one deliberate deviation from that
+// prototype: forecourt sales (used everywhere in reports/totals) is always
+// the computed litres × price figure, never a manually-typed one — so it's
+// never blank for a day that has litres and a price in force. The
+// manually-typed field is `forecourtCashDrop`: cash physically dropped,
+// used only for the cash-specific over/short check against cash expected
+// (forecourt sales minus electronic payments). Do not "improve" this
+// further without also updating the acceptance tests in BUILD_BRIEF.md
+// section 10; this file is the reference implementation the brief points to.
 //
-// Shapes (kept identical to the prototype so the port is a straight line
-// copy, not a rewrite):
+// Shapes:
 //   entry e = {
 //     date, dips:{PMS,AGO,VP}, deliv:{PMS,AGO,VP}, sold:{PMS,AGO,VP},
-//     forecourt, shop, lpg, lubes,
+//     forecourtCashDrop, shop, lpg, lubes,
 //     payCash, payMomo, payShell, payVisa, payCredit,
 //     bankCente, bankExim, expenses, notes
 //   }
@@ -111,8 +116,6 @@ export function compute(e, { settings, entries, dates }) {
     r.fuelGP += sold * m;
     r.litres += sold;
   });
-  r.declared = num(e.forecourt);
-  r.forecourtVar = has(e.forecourt) ? r.declared - r.fuelExpected : 0;
   NF.forEach(({ k }) => {
     const v = num(e[k]);
     const g = (v * num(settings.nonFuel && settings.nonFuel[k])) / 100;
@@ -123,10 +126,23 @@ export function compute(e, { settings, entries, dates }) {
   r.totalGP = r.fuelGP + r.nfGP;
   r.expenses = num(e.expenses);
   r.afterExp = r.totalGP - r.expenses;
-  r.totalSales = r.declared + r.nfSales;
+  // Forecourt sales, used everywhere in reports/totals, is always the
+  // computed litres x price figure (r.fuelExpected) — never blank for a
+  // day that has litres and a price in force.
+  r.totalSales = r.fuelExpected + r.nfSales;
   const PK = ["payCash", "payMomo", "payShell", "payVisa", "payCredit"];
   r.paid = PK.reduce((a, k) => a + num(e[k]), 0);
   r.paidEntered = PK.some((k) => has(e[k]));
+  // Cash-specific check: what should be left as physical cash is forecourt
+  // sales minus what already came in through electronic channels (cash
+  // itself is deliberately excluded from this subtraction — it's the thing
+  // being checked, not a channel netted out of it). Only meaningful once a
+  // cash drop is actually declared.
+  const electronicPaid = num(e.payMomo) + num(e.payShell) + num(e.payVisa) + num(e.payCredit);
+  r.cashExpected = r.fuelExpected - electronicPaid;
+  r.cashDrop = num(e.forecourtCashDrop);
+  r.cashDropEntered = has(e.forecourtCashDrop);
+  r.cashOverShort = r.cashDropEntered ? r.cashDrop - r.cashExpected : 0;
   r.bankCente = num(e.bankCente);
   r.bankExim = num(e.bankExim);
   r.banked = r.bankCente + r.bankExim;
@@ -200,7 +216,6 @@ export function totals(rows) {
     AGO: 0,
     VP: 0,
     litres: 0,
-    declared: 0,
     fuelExpected: 0,
     fuelGP: 0,
     shop: 0,
@@ -209,7 +224,9 @@ export function totals(rows) {
     nfSales: 0,
     nfGP: 0,
     totalGP: 0,
-    forecourtVar: 0,
+    cashExpected: 0,
+    cashDrop: 0,
+    cashOverShort: 0,
     stockVar: { PMS: 0, AGO: 0, VP: 0 },
     expenses: 0,
     banked: 0,
@@ -228,7 +245,6 @@ export function totals(rows) {
       if (r.stock[k]) T.stockVar[k] += r.stock[k].v;
     });
     T.litres += r.litres;
-    T.declared += r.declared;
     T.fuelExpected += r.fuelExpected;
     T.fuelGP += r.fuelGP;
     NF.forEach(({ k }) => {
@@ -237,7 +253,9 @@ export function totals(rows) {
     T.nfSales += r.nfSales;
     T.nfGP += r.nfGP;
     T.totalGP += r.totalGP;
-    T.forecourtVar += r.forecourtVar;
+    T.cashExpected += r.cashExpected;
+    T.cashDrop += r.cashDrop;
+    T.cashOverShort += r.cashOverShort;
     T.expenses += r.expenses;
     T.banked += r.banked;
     T.bankCente += r.bankCente;
@@ -277,14 +295,14 @@ export function rowVals(d, r) {
     r.fuel.AGO.sold,
     r.fuel.VP.sold,
     r.litres,
-    r.declared,
+    r.fuelExpected,
     r.fuelGP,
     r.nf.shop.sales,
     r.nf.lpg.sales,
     r.nf.lubes.sales,
     r.nfGP,
     r.totalGP,
-    r.forecourtVar,
+    r.cashOverShort,
     sv,
   ];
 }
@@ -296,14 +314,14 @@ export function totVals(T) {
     T.AGO,
     T.VP,
     T.litres,
-    T.declared,
+    T.fuelExpected,
     T.fuelGP,
     T.shop,
     T.lpg,
     T.lubes,
     T.nfGP,
     T.totalGP,
-    T.forecourtVar,
+    T.cashOverShort,
     T.stockVar.PMS + T.stockVar.AGO + T.stockVar.VP,
   ];
 }
