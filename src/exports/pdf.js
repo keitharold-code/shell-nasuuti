@@ -1,9 +1,19 @@
 import { jsPDF } from "jspdf";
 import "jspdf-autotable";
 import { PRODUCTS, COLS, rowVals, totVals, isLit, totals, discrepancies } from "../lib/calc.js";
-import { ugx, lit, sgn, dmy } from "../lib/format.js";
+import { ugx, lit, dmy } from "../lib/format.js";
 import { downloadFile } from "../lib/download.js";
 import { toast } from "../lib/toast.js";
+
+// jsPDF's built-in Helvetica font doesn't have a glyph for the proper
+// minus sign (U+2212) format.js's sgn() uses — it renders as a broken
+// character, and in a narrow autoTable column that forces the whole cell
+// to wrap vertically, one character per line. A plain ASCII hyphen has no
+// such problem. The web UI and Excel export both render U+2212 fine, so
+// this stays local to the PDF export rather than changing sgn() itself.
+function sgn(n, f) {
+  return (n > 0 ? "+" : n < 0 ? "-" : "") + f(Math.abs(n));
+}
 
 export function exportPdf(rows, settings, from, to) {
   if (!rows.length) {
