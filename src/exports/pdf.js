@@ -82,6 +82,11 @@ export function exportPdf(rows, settings, from, to) {
     headStyles: { fillColor: petrol, halign: "right" },
     footStyles: { fillColor: canopy, textColor: [29, 26, 12], halign: "right" },
     margin: { left: 24, right: 24 }, columnStyles: { 0: { halign: "left" } },
+    // Without this, autoTable repeats the Total row on every page the
+    // table spans — showing the full-period total after only a partial
+    // set of rows on page 1, which reads as if those rows alone summed
+    // to it. It should appear once, after the actual last row.
+    showFoot: "lastPage",
     head: [COLS], body: rows.map(({ d, r }) => rowVals(d, r).map(fmt)), foot: [totVals(T).map(fmt)],
   });
 
