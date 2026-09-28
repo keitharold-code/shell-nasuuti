@@ -57,6 +57,7 @@ export function exportPdf(rows, settings, from, to) {
     ],
     columnStyles: { 1: { halign: "right" } },
   });
+  const summaryFinalY = doc.lastAutoTable.finalY;
 
   doc.autoTable({
     startY: 78, theme: "grid", styles: { fontSize: 9, cellPadding: 4 },
@@ -68,8 +69,13 @@ export function exportPdf(rows, settings, from, to) {
     ],
     columnStyles: { 1: { halign: "right" }, 2: { halign: "right" } },
   });
+  const productFinalY = doc.lastAutoTable.finalY;
 
-  const y = Math.max(doc.lastAutoTable.finalY, 78) + 60;
+  // The two tables above sit side by side from the same startY, so the
+  // next section must clear whichever one actually ran taller — not just
+  // the one that happened to be drawn last (doc.lastAutoTable only knows
+  // about that most recent call).
+  const y = Math.max(summaryFinalY, productFinalY, 78) + 60;
   const fmt = (v, i) => (i === 0 ? v : i === 12 || i === 13 ? sgn(v, isLit(i) ? lit : ugx) : isLit(i) ? lit(v) : ugx(v));
   doc.autoTable({
     startY: Math.max(y, 250), theme: "striped", styles: { fontSize: 7.5, cellPadding: 3, halign: "right" },
