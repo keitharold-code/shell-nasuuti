@@ -56,7 +56,11 @@ export function entryToRow(e) {
     pay_visa: e.payVisa,
     pay_credit: e.payCredit,
     bank_centenary: e.bankCente,
-    bank_exim: e.bankExim,
+    // bank_exim is deliberately never written here — the app only ever
+    // collects one banking field now. Omitting the key (rather than
+    // sending null) means an upsert on an existing historical row leaves
+    // whatever bank_exim it already has untouched, per the requirement
+    // that old Exim amounts keep counting in "Total banked" unmigrated.
     expenses: e.expenses,
     notes: e.notes || null,
   };
@@ -90,6 +94,8 @@ export function rowToSettings(priceRows, settingsRow) {
       lubes: settingsRow?.lubes_margin_pct ?? 0,
     },
     tolerance: settingsRow?.stock_tolerance_pct ?? 0.5,
+    bankingAccountName: settingsRow?.banking_account_name ?? "Centenary",
+    singleAccountBankingFrom: settingsRow?.single_account_banking_from ?? "2026-09-29",
   };
 }
 
@@ -176,6 +182,18 @@ export async function saveMargins({ shop, lpg, lubes, tolerance }) {
       lpg_margin_pct: lpg,
       lubes_margin_pct: lubes,
       stock_tolerance_pct: tolerance,
+    })
+    .eq("id", 1);
+  if (error) throw error;
+  await reloadAll();
+}
+
+export async function saveBankingSettings({ bankingAccountName, singleAccountBankingFrom }) {
+  const { error } = await supabase
+    .from("settings")
+    .update({
+      banking_account_name: bankingAccountName,
+      single_account_banking_from: singleAccountBankingFrom,
     })
     .eq("id", 1);
   if (error) throw error;

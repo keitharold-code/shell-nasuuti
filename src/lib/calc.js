@@ -133,6 +133,7 @@ export function compute(e, { settings, entries, dates }) {
   const PK = ["payCash", "payMomo", "payShell", "payVisa", "payCredit"];
   r.paid = PK.reduce((a, k) => a + num(e[k]), 0);
   r.paidEntered = PK.some((k) => has(e[k]));
+  r.cashCollected = num(e.payCash);
   // Cash-specific check: what should be left as physical cash is forecourt
   // sales minus what already came in through electronic channels (cash
   // itself is deliberately excluded from this subtraction — it's the thing
@@ -143,10 +144,24 @@ export function compute(e, { settings, entries, dates }) {
   r.cashDrop = num(e.forecourtCashDrop);
   r.cashDropEntered = has(e.forecourtCashDrop);
   r.cashOverShort = r.cashDropEntered ? r.cashDrop - r.cashExpected : 0;
+  // bankExim is never written by the app for entries dated on/after the
+  // single-account switchover, but stays summed for continuity: entries
+  // from before the switch were genuinely banked across two accounts, and
+  // that history must keep reading correctly.
   r.bankCente = num(e.bankCente);
   r.bankExim = num(e.bankExim);
   r.banked = r.bankCente + r.bankExim;
   r.bankEntered = has(e.bankCente) || has(e.bankExim);
+
+  // From the single-account switchover date, banking is one daily drop of
+  // all sales — cash, shop, LPG and lubes together — to one account, which
+  // makes two whole-day checks meaningful that weren't before (a station
+  // banking to two accounts on an unpredictable split can't be checked
+  // this way). Before the switchover these are "—", not zero: zero would
+  // read as "checked, no problem" for a day that was never checkable.
+  r.bankingApplicable = e.date >= settings.singleAccountBankingFrom;
+  r.unaccountedSales = r.bankingApplicable ? r.totalSales - r.paid : null;
+  r.cashNotBanked = r.bankingApplicable ? r.cashCollected - r.expenses - r.banked : null;
   const pd = prevEntryDate(dates, e.date);
   const prev = pd ? entries[pd] : null;
   r.prevDate = pd;
@@ -227,6 +242,9 @@ export function totals(rows) {
     cashExpected: 0,
     cashDrop: 0,
     cashOverShort: 0,
+    unaccountedSales: 0,
+    cashNotBanked: 0,
+    bankingChecksApplicable: false,
     stockVar: { PMS: 0, AGO: 0, VP: 0 },
     expenses: 0,
     banked: 0,
@@ -256,6 +274,11 @@ export function totals(rows) {
     T.cashExpected += r.cashExpected;
     T.cashDrop += r.cashDrop;
     T.cashOverShort += r.cashOverShort;
+    if (r.bankingApplicable) {
+      T.unaccountedSales += r.unaccountedSales;
+      T.cashNotBanked += r.cashNotBanked;
+      T.bankingChecksApplicable = true;
+    }
     T.expenses += r.expenses;
     T.banked += r.banked;
     T.bankCente += r.bankCente;
@@ -284,6 +307,8 @@ export const COLS = [
   "Non-fuel GP",
   "Total GP",
   "Cash over/short",
+  "Unaccounted sales",
+  "Cash not banked",
   "Stock var L",
 ];
 
@@ -303,6 +328,8 @@ export function rowVals(d, r) {
     r.nfGP,
     r.totalGP,
     r.cashOverShort,
+    r.unaccountedSales,
+    r.cashNotBanked,
     sv,
   ];
 }
@@ -322,8 +349,15 @@ export function totVals(T) {
     T.nfGP,
     T.totalGP,
     T.cashOverShort,
+    T.bankingChecksApplicable ? T.unaccountedSales : null,
+    T.bankingChecksApplicable ? T.cashNotBanked : null,
     T.stockVar.PMS + T.stockVar.AGO + T.stockVar.VP,
   ];
 }
 
-export const isLit = (i) => [1, 2, 3, 4, 13].includes(i);
+// Columns 13/14 (Unaccounted sales, Cash not banked) can be null — not an
+// applicable check before the single-account switchover date — and must
+// render as an em dash rather than 0, which would read as "checked, fine".
+export const isLit = (i) => [1, 2, 3, 4, 15].includes(i);
+export const isSgn = (i) => [12, 13, 14, 15].includes(i);
+export const isBankingCheck = (i) => i === 13 || i === 14;

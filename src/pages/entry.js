@@ -8,7 +8,7 @@ import { toast } from "../lib/toast.js";
 const flat = [
   "shop", "lpg", "lubes",
   "payCash", "payMomo", "payShell", "payVisa", "payCredit",
-  "forecourtCashDrop", "bankCente", "bankExim", "expenses",
+  "forecourtCashDrop", "bankCente", "expenses",
 ];
 
 let dirty = false;
@@ -95,7 +95,7 @@ function buildForm(root) {
         <section class="block">
           <h2>How sales were paid <small>UGX · optional</small></h2>
           <div class="grid5">
-            <label class="f">Cash<input type="number" step="any" min="0" inputmode="decimal" id="payCash"></label>
+            <label class="f">Cash collected (forecourt + shop, LPG, lubes)<input type="number" step="any" min="0" inputmode="decimal" id="payCash"></label>
             <label class="f">Mobile money<input type="number" step="any" min="0" inputmode="decimal" id="payMomo"></label>
             <label class="f">Shell Card<input type="number" step="any" min="0" inputmode="decimal" id="payShell"></label>
             <label class="f">Visa<input type="number" step="any" min="0" inputmode="decimal" id="payVisa"></label>
@@ -114,10 +114,10 @@ function buildForm(root) {
         <section class="block">
           <h2>Banking &amp; expenses <small>UGX · optional</small></h2>
           <div class="grid3">
-            <label class="f">Banked — Centenary<input type="number" step="any" min="0" inputmode="decimal" id="bankCente"></label>
-            <label class="f">Banked — Exim<input type="number" step="any" min="0" inputmode="decimal" id="bankExim"></label>
+            <label class="f">Banked — <span id="bankAcctLabel">Centenary</span><input type="number" step="any" min="0" inputmode="decimal" id="bankCente"></label>
             <label class="f">Petty cash / expenses paid<input type="number" step="any" min="0" inputmode="decimal" id="expenses"></label>
           </div>
+          <p class="hint">All sales — forecourt, shop, LPG and lubes — are banked together to this one account.</p>
           <label class="f" style="margin-top:10px">Notes (deliveries, pump faults, incidents)
             <textarea id="notes" rows="2"></textarea>
           </label>
@@ -210,6 +210,7 @@ function renderCalc(root) {
   $(root, "rGP").textContent = ugx(r.totalGP);
   $(root, "rFuelGP").textContent = ugx(r.fuelGP);
   $(root, "rNfGP").textContent = ugx(r.nfGP);
+  $(root, "bankAcctLabel").textContent = settings.bankingAccountName || "Centenary";
 
   let c = "";
   if (!r.price) {
@@ -268,16 +269,24 @@ function renderCalc(root) {
   $(root, "rStock").innerHTML = s;
 
   let t = kv("Total sales", ugx(r.totalSales)) + kv("Litres sold", lit(r.litres));
-  if (r.paidEntered)
-    t +=
-      kv("Payments recorded", ugx(r.paid)) +
-      kv("Unaccounted vs sales", sgn(r.paid - r.totalSales, ugx), Math.abs(r.paid - r.totalSales) > 1 ? "neg" : "");
-  if (r.bankEntered)
-    t +=
-      kv("Banked — Centenary", ugx(r.bankCente)) +
-      kv("Banked — Exim", ugx(r.bankExim)) +
-      kv("Total banked", ugx(r.banked));
+  if (r.paidEntered) t += kv("Payments recorded", ugx(r.paid));
+  if (r.bankEntered) {
+    t += kv("Banked — " + (settings.bankingAccountName || "Centenary"), ugx(r.bankCente));
+    if (has(e.bankExim)) t += kv("Banked — Exim (legacy)", ugx(r.bankExim));
+    t += kv("Total banked", ugx(r.banked));
+  }
   if (has(e.expenses)) t += kv("Expenses", ugx(r.expenses)) + kv("Gross profit after expenses", ugx(r.afterExp));
+  t +=
+    kv(
+      "Unaccounted sales",
+      r.bankingApplicable ? sgn(r.unaccountedSales, ugx) : "—",
+      r.bankingApplicable && Math.abs(r.unaccountedSales) > 0.5 ? "neg" : ""
+    ) +
+    kv(
+      "Cash not banked",
+      r.bankingApplicable ? sgn(r.cashNotBanked, ugx) : "—",
+      r.bankingApplicable && Math.abs(r.cashNotBanked) > 0.5 ? "neg" : ""
+    );
   $(root, "rTotals").innerHTML = t;
 }
 

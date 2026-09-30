@@ -1,4 +1,4 @@
-import { reportRows, discrepancies, totals, COLS, rowVals, totVals, isLit } from "../lib/calc.js";
+import { reportRows, discrepancies, totals, COLS, rowVals, totVals, isLit, isSgn, isBankingCheck } from "../lib/calc.js";
 import { ugx, lit, dmy, sgn, esc, iso, addDays } from "../lib/format.js";
 import { getState } from "../lib/store.js";
 import { exportXlsx } from "../exports/xlsx.js";
@@ -35,8 +35,15 @@ function setPreset(root) {
 
 function cell(v, i) {
   if (i === 0) return esc(v);
+  if (v == null) return "—";
   const f = isLit(i) ? lit : ugx;
-  if (i === 12 || i === 13) return `<span class="${v < -0.5 ? "neg" : v > 0.5 ? "pos" : ""}">${sgn(v, f)}</span>`;
+  if (isBankingCheck(i)) {
+    // Unaccounted sales / Cash not banked: flagged red whenever nonzero,
+    // in either direction — unlike the checks below, a positive value
+    // here isn't a good sign, just the sign of a different problem.
+    return `<span class="${Math.abs(v) > 0.5 ? "neg" : ""}">${sgn(v, f)}</span>`;
+  }
+  if (isSgn(i)) return `<span class="${v < -0.5 ? "neg" : v > 0.5 ? "pos" : ""}">${sgn(v, f)}</span>`;
   return f(v);
 }
 
@@ -74,6 +81,8 @@ function refresh(root) {
     ["Litres sold", lit(T.litres)],
     ["Total sales", ugx(T.totalSales)],
     ["Cash over/short", sgn(T.cashOverShort, ugx)],
+    ["Unaccounted sales", T.bankingChecksApplicable ? sgn(T.unaccountedSales, ugx) : "—"],
+    ["Cash not banked", T.bankingChecksApplicable ? sgn(T.cashNotBanked, ugx) : "—"],
     ["Stock discrepancies flagged", String(D.length)],
   ];
   $(root, "kpis").innerHTML = kp

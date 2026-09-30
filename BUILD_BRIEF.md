@@ -48,6 +48,8 @@ create table settings (
   lpg_margin_pct numeric not null default 0,
   lubes_margin_pct numeric not null default 0,
   stock_tolerance_pct numeric not null default 0.5,
+  banking_account_name text not null default 'Centenary',
+  single_account_banking_from date not null default '2026-09-29',
   updated_by uuid references profiles(id),
   updated_at timestamptz default now()
 );
@@ -58,8 +60,10 @@ create table daily_entries (
   deliv_pms numeric, deliv_ago numeric, deliv_vp numeric,       -- litres received
   sold_pms numeric, sold_ago numeric, sold_vp numeric,          -- litres sold (meters)
   forecourt_cash_drop numeric, shop_sales numeric, lpg_sales numeric, lubes_sales numeric,
-  pay_cash numeric, pay_momo numeric, pay_shell_card numeric, pay_visa numeric, pay_credit numeric,
-  bank_centenary numeric, bank_exim numeric,
+  pay_cash numeric,   -- cash collected: forecourt + shop, LPG, lubes combined
+  pay_momo numeric, pay_shell_card numeric, pay_visa numeric, pay_credit numeric,
+  bank_centenary numeric,  -- banked to the one account (its name is admin-configurable)
+  bank_exim numeric,       -- legacy second account; read-only from the single-account switchover date on
   expenses numeric,
   notes text,
   created_by uuid references profiles(id),
@@ -98,8 +102,12 @@ Also implement:
 - **Total sales** = forecourt sales + shop + LPG + lubes.
 - **Non-fuel GP** = shop × shop% + LPG × LPG% + lubes × lubes%.
 - **Total GP** = fuel GP + non-fuel GP. **GP after expenses** = total GP − expenses.
-- **Payments check:** Σ (cash, MoMo, Shell Card, Visa, credit) − total sales. Flag if not zero.
-- **Total banked** = Centenary + Exim.
+- **Cash collected** is one field (`pay_cash`) covering forecourt cash plus shop, LPG and lubes cash together — the station banks all of it as a single daily drop, so it isn't split by source.
+- **Total banked** = the one banking account (`bank_centenary`) + `bank_exim`. `bank_exim` is a legacy column: the app never writes to it for entries dated on or after `single_account_banking_from`, but its historical values keep counting here unmigrated, so past totals stay correct.
+- **Unaccounted sales** = total sales − (cash collected + mobile money + Shell Card + Visa + credit). Replaces the older, differently-signed "payments check" — this is total sales minus everything received, so a positive value means sales that weren't accounted for by any payment method, a negative value means more was received than the sales figure explains.
+- **Cash not banked** = cash collected − expenses − banked. What should be left over after petty cash/expenses are taken out and the rest is banked.
+- Both of the above are **only computed for entries dated on or after `settings.single_account_banking_from`** (default 2026-09-29) — before that date the station banked to two accounts on a split that isn't checkable this way, so they show "—", not zero: zero would read as "checked, no problem" for a day that was never checkable. Report and export totals for these two figures sum only the applicable days; if no day in the period qualifies, the total is "—" too. Every other figure (GP, stock, forecourt cash drop) is computed identically for every date regardless of this setting — it only ever gates these two checks.
+- Both are **flagged whenever not zero**, in either direction — unlike the forecourt cash-drop check and the stock checks, a positive value here isn't a good sign, just the sign of a different kind of problem, so there's no separate "good"/"bad" color for the sign.
 - **Daily stock check**, per product:
   - Book = previous entry's dip + delivered − sold.
   - Variance = actual dip − book.
@@ -115,12 +123,12 @@ Also implement:
 
 ## 6. Screens
 1. **Login.** Email and password, plus password reset.
-2. **Daily entry.** Default trading date = yesterday; selecting a date loads any existing entry. Live GP readout, forecourt cash check, stock reconciliation (daily and cumulative) and totals, all as in the prototype.
+2. **Daily entry.** Default trading date = yesterday; selecting a date loads any existing entry. Live GP readout, forecourt cash check (unchanged), stock reconciliation (daily and cumulative), and totals — including Unaccounted sales and Cash not banked, both red-flagged when nonzero and shown as "—" before the single-account switchover date.
 3. **Reports.**
    - Periods: last 7 days, this month, last month, all, or custom.
-   - KPIs, daily GP chart (fuel vs non-fuel), daily table with a totals row, and a stock discrepancies table.
+   - KPIs, daily GP chart (fuel vs non-fuel), daily table with a totals row (including Unaccounted sales and Cash not banked columns), and a stock discrepancies table.
    - Selecting a row opens that day's entry.
-4. **Admin.** Price history (add or remove, with effective date), non-fuel margins, tolerance, and user management (invite a user, set role, deactivate).
+4. **Admin.** Price history (add or remove, with effective date), non-fuel margins, tolerance, banking account name and single-account-banking-from date, and user management (invite a user, set role, deactivate).
 5. **Audit log** (admin only). Filter by date and user.
 
 ## 7. Exports

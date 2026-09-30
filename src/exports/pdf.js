@@ -50,9 +50,11 @@ export function exportPdf(rows, settings, from, to) {
       ["Forecourt sales (litres × price)", ugx(T.fuelExpected)],
       ["Cash expected / drop declared", ugx(T.cashExpected) + " / " + ugx(T.cashDrop)],
       ["Cash over/short", sgn(T.cashOverShort, ugx)],
+      ["Unaccounted sales", T.bankingChecksApplicable ? sgn(T.unaccountedSales, ugx) : "—"],
+      ["Cash not banked", T.bankingChecksApplicable ? sgn(T.cashNotBanked, ugx) : "—"],
       ["Expenses", ugx(T.expenses)],
       ["Gross profit after expenses", ugx(T.totalGP - T.expenses)],
-      ["Banked — Centenary / Exim", ugx(T.bankCente) + " / " + ugx(T.bankExim)],
+      ["Banked — " + (settings.bankingAccountName || "Centenary") + " / Exim (legacy)", ugx(T.bankCente) + " / " + ugx(T.bankExim)],
       ["Shell Card / Visa", ugx(T.payShell) + " / " + ugx(T.payVisa)],
     ],
     columnStyles: { 1: { halign: "right" } },
@@ -76,7 +78,12 @@ export function exportPdf(rows, settings, from, to) {
   // the one that happened to be drawn last (doc.lastAutoTable only knows
   // about that most recent call).
   const y = Math.max(summaryFinalY, productFinalY, 78) + 60;
-  const fmt = (v, i) => (i === 0 ? v : i === 12 || i === 13 ? sgn(v, isLit(i) ? lit : ugx) : isLit(i) ? lit(v) : ugx(v));
+  const fmt = (v, i) => {
+    if (i === 0) return v;
+    if (v == null) return "—";
+    if ([12, 13, 14, 15].includes(i)) return sgn(v, isLit(i) ? lit : ugx);
+    return isLit(i) ? lit(v) : ugx(v);
+  };
   doc.autoTable({
     startY: Math.max(y, 250), theme: "striped", styles: { fontSize: 7.5, cellPadding: 3, halign: "right" },
     headStyles: { fillColor: petrol, halign: "right" },

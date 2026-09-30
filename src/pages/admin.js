@@ -1,7 +1,7 @@
 import { PRODUCTS } from "../lib/calc.js";
 import { num, ugx, dmy, iso } from "../lib/format.js";
 import { getState } from "../lib/store.js";
-import { addPriceSet, removePriceSet, saveMargins } from "../lib/data.js";
+import { addPriceSet, removePriceSet, saveMargins, saveBankingSettings } from "../lib/data.js";
 import { listProfiles, setUserRole, inviteUser, setUserActive } from "../lib/adminUsers.js";
 import { toast } from "../lib/toast.js";
 
@@ -87,6 +87,15 @@ function build(root) {
       <p class="hint">Tolerance flags any day, and any run of days without a delivery, where the dip differs from book stock by more than this share of litres sold. Gains are flagged as well as losses.</p>
     </section>
     <section class="block">
+      <h2>Banking</h2>
+      <div class="admin-grid">
+        <label class="f">Banking account name<input type="text" id="bAcctName"></label>
+        <label class="f">Single-account banking from<input type="date" id="bFrom"></label>
+      </div>
+      <button class="btn primary" id="saveBankingBtn">Save banking settings</button>
+      <p class="hint">All sales are banked daily to this one account. "Unaccounted sales" and "Cash not banked" are only checked from this date onward — entries before it show "—" for both, since the station banked to two accounts before and the split isn't checkable that way.</p>
+    </section>
+    <section class="block">
       <h2>Users</h2>
       <div id="userList"></div>
       <h2 style="font-size:17px;margin-top:18px">Invite a user</h2>
@@ -114,6 +123,7 @@ function build(root) {
     if (b) onRemovePrice(b.dataset.del);
   });
   $(root, "saveMarginsBtn").addEventListener("click", () => onSaveMargins(root));
+  $(root, "saveBankingBtn").addEventListener("click", () => onSaveBanking(root));
 
   $(root, "inviteBtn").addEventListener("click", () => onInvite(root));
   $(root, "userList").addEventListener("change", (e) => {
@@ -139,6 +149,12 @@ function refresh(root) {
     $(root, "mLpg").value = num(settings.nonFuel.lpg);
     $(root, "mLubes").value = num(settings.nonFuel.lubes);
     $(root, "mTol").value = num(settings.tolerance);
+  }
+
+  const editingBanking = root.contains(active) && ["bAcctName", "bFrom"].includes(active.id);
+  if (!editingBanking) {
+    $(root, "bAcctName").value = settings.bankingAccountName || "Centenary";
+    $(root, "bFrom").value = settings.singleAccountBankingFrom || "2026-09-29";
   }
 
   const list = [...(settings.priceHistory || [])].sort((a, b) => (a.from < b.from ? 1 : -1));
@@ -196,6 +212,25 @@ async function onSaveMargins(root) {
       tolerance: num($(root, "mTol").value),
     });
     toast("Margins saved.");
+  } catch (err) {
+    toast("Couldn't save: " + (err.message || ""));
+  }
+}
+
+async function onSaveBanking(root) {
+  const name = $(root, "bAcctName").value.trim();
+  const from = $(root, "bFrom").value;
+  if (!name) {
+    toast("Enter the banking account name.");
+    return;
+  }
+  if (!from) {
+    toast("Pick the single-account banking from date.");
+    return;
+  }
+  try {
+    await saveBankingSettings({ bankingAccountName: name, singleAccountBankingFrom: from });
+    toast("Banking settings saved.");
   } catch (err) {
     toast("Couldn't save: " + (err.message || ""));
   }

@@ -25,6 +25,8 @@ export function exportXlsx(rows, settings, from, to) {
     ["Cash expected — sales minus electronic payments (UGX)", Math.round(T.cashExpected)],
     ["Cash drop declared (UGX)", Math.round(T.cashDrop)],
     ["Cash over/short (UGX)", Math.round(T.cashOverShort)],
+    ["Unaccounted sales (UGX)", T.bankingChecksApplicable ? Math.round(T.unaccountedSales) : "—"],
+    ["Cash not banked (UGX)", T.bankingChecksApplicable ? Math.round(T.cashNotBanked) : "—"],
     [],
     ["Product", "Litres sold", "Stock variance (L)"],
     ...PRODUCTS.map(({ k, label }) => [label, +T[k].toFixed(2), +T.stockVar[k].toFixed(2)]),
@@ -34,29 +36,30 @@ export function exportXlsx(rows, settings, from, to) {
     ...NF.map(({ k, label }) => [label, Math.round(T[k]), num(settings.nonFuel[k])]),
     [],
     ["Expenses (UGX)", Math.round(T.expenses)],
-    ["Banked — Centenary (UGX)", Math.round(T.bankCente)],
-    ["Banked — Exim (UGX)", Math.round(T.bankExim)],
+    ["Banked — " + (settings.bankingAccountName || "Centenary") + " (UGX)", Math.round(T.bankCente)],
+    ["Banked — Exim, legacy (UGX)", Math.round(T.bankExim)],
     ["Total banked (UGX)", Math.round(T.banked)],
     [],
     ["Payments", "UGX"],
-    ["Cash", Math.round(T.payCash)],
+    ["Cash collected", Math.round(T.payCash)],
     ["Mobile money", Math.round(T.payMomo)],
     ["Shell Card", Math.round(T.payShell)],
     ["Visa", Math.round(T.payVisa)],
     ["Credit (debtors)", Math.round(T.payCredit)],
   ];
 
+  const roundCell = (v, i) => (i === 0 ? v : v == null ? "—" : isLit(i) ? +v.toFixed(2) : Math.round(v));
   const daily = [
     COLS,
-    ...rows.map(({ d, r }) => rowVals(d, r).map((v, i) => (i === 0 ? v : isLit(i) ? +v.toFixed(2) : Math.round(v)))),
-    totVals(T).map((v, i) => (i === 0 ? v : isLit(i) ? +v.toFixed(2) : Math.round(v))),
+    ...rows.map(({ d, r }) => rowVals(d, r).map(roundCell)),
+    totVals(T).map(roundCell),
   ];
 
   const detail = [
     [
       "Date", "PMS dip", "AGO dip", "V-Power dip", "PMS delivered", "AGO delivered", "V-Power delivered",
-      "Cash", "Mobile money", "Shell Card", "Visa", "Credit", "Cash drop",
-      "Banked Centenary", "Banked Exim", "Expenses", "Notes",
+      "Cash collected", "Mobile money", "Shell Card", "Visa", "Credit", "Cash drop",
+      "Banked " + (settings.bankingAccountName || "Centenary"), "Banked Exim (legacy)", "Expenses", "Notes",
     ],
     ...rows.map(({ d, e }) =>
       [
