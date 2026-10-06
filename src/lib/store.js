@@ -5,7 +5,7 @@ const state = {
   dbReady: false,
   session: null,
   profile: null, // { id, full_name, role, is_active }
-  settings: { priceHistory: [], nonFuel: { shop: 0, lpg: 0, lubes: 0 }, tolerance: 0.5 },
+  settings: { priceHistory: [], nonFuelMarginHistory: [], tolerance: 0.5, fuelCostBasis: "FIXED" },
   entries: {}, // { [date]: entry }
   dates: [], // sorted ascending
   connectionError: null,
