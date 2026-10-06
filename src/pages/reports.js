@@ -1,9 +1,13 @@
-import { reportRows, discrepancies, totals, COLS, rowVals, totVals, isLit, isSgn, isBankingCheck } from "../lib/calc.js";
+import { PRODUCTS, COLS, rowVals, totVals, totals, isLit, isSgn, isBankingCheck } from "../lib/calc.js";
 import { ugx, lit, dmy, sgn, esc, iso, addDays } from "../lib/format.js";
 import { getState } from "../lib/store.js";
+import { fetchReportRows, fetchDiscrepancies } from "../lib/data.js";
 import { exportXlsx } from "../exports/xlsx.js";
 import { exportPdf } from "../exports/pdf.js";
 import { openDate } from "./entry.js";
+import { toast } from "../lib/toast.js";
+
+const PRODUCT_LABEL = Object.fromEntries(PRODUCTS.map((p) => [p.k, p.label]));
 
 function $(root, id) {
   return root.querySelector("#" + id);
@@ -34,7 +38,7 @@ function setPreset(root) {
 }
 
 function cell(v, i) {
-  if (i === 0) return esc(v);
+  if (i === 0) return esc(dmy(v));
   if (v == null) return "—";
   const f = isLit(i) ? lit : ugx;
   if (isBankingCheck(i)) {
@@ -50,34 +54,46 @@ function cell(v, i) {
 function buildChart(rows) {
   if (!rows.length) return '<div class="empty">No entries in this period.</div>';
   const W = Math.max(600, rows.length * 34), H = 200, pad = 24;
-  const max = Math.max(1, ...rows.map((x) => x.r.totalGP));
+  const max = Math.max(1, ...rows.map((r) => r.total_gp));
   const bw = (W - pad * 2) / rows.length;
   let svg = `<svg viewBox="0 0 ${W} ${H + 22}" width="100%" role="img" aria-label="Daily gross profit chart" style="max-height:260px">`;
-  rows.forEach((x, i) => {
-    const hf = (x.r.fuelGP / max) * (H - 10);
-    const hn = (x.r.nfGP / max) * (H - 10);
+  rows.forEach((r, i) => {
+    const hf = (r.fuel_gp / max) * (H - 10);
+    const hn = (r.nf_gp / max) * (H - 10);
     const bx = pad + i * bw + bw * 0.15, w = bw * 0.7;
-    svg += `<g><title>${dmy(x.d)}: UGX ${ugx(x.r.totalGP)}</title><rect x="${bx}" y="${H - hf}" width="${w}" height="${hf}" fill="var(--petrol-2)"/><rect x="${bx}" y="${H - hf - hn}" width="${w}" height="${hn}" fill="var(--canopy)"/></g>`;
+    svg += `<g><title>${dmy(r.trading_date)}: UGX ${ugx(r.total_gp)}</title><rect x="${bx}" y="${H - hf}" width="${w}" height="${hf}" fill="var(--petrol-2)"/><rect x="${bx}" y="${H - hf - hn}" width="${w}" height="${hn}" fill="var(--canopy)"/></g>`;
     if (rows.length <= 31)
-      svg += `<text x="${bx + w / 2}" y="${H + 16}" font-size="11" text-anchor="middle" fill="var(--muted)">${x.d.slice(8)}</text>`;
+      svg += `<text x="${bx + w / 2}" y="${H + 16}" font-size="11" text-anchor="middle" fill="var(--muted)">${r.trading_date.slice(8)}</text>`;
   });
   svg += `<line x1="${pad}" x2="${W - pad}" y1="${H}" y2="${H}" stroke="var(--line)"/></svg>`;
   return `<div style="overflow-x:auto">${svg}</div>`;
 }
 
-function refresh(root) {
+async function refresh(root) {
   if ($(root, "preset").value === "all") setPreset(root);
-  const { dates, entries, settings } = getState();
   const from = $(root, "from").value, to = $(root, "to").value;
-  const rows = reportRows(dates, entries, settings, from, to);
+  if (!from || !to) return;
+
+  let rows, D;
+  try {
+    [rows, D] = await Promise.all([fetchReportRows(from, to), fetchDiscrepancies(from, to)]);
+  } catch (err) {
+    $(root, "kpis").innerHTML = `<div class="notice err">Couldn't load the report: ${err.message || ""}</div>`;
+    return;
+  }
+
   const T = totals(rows);
-  const D = discrepancies(rows, entries, settings);
 
   const kp = [
-    ["Total gross profit", ugx(T.totalGP), true],
-    ["Average GP per day", T.days ? ugx(T.totalGP / T.days) : "0"],
+    ["Net profit", ugx(T.netProfit), true],
+    ["Total gross profit", ugx(T.totalGP)],
     ["Fuel GP", ugx(T.fuelGP)],
     ["Non-fuel GP", ugx(T.nfGP)],
+    ["Stock gain/(loss) at cost", sgn(T.stockGainLossAtCost, ugx)],
+    ["Delivery shortfall at cost", sgn(T.deliveryShortfallAtCost, ugx)],
+    ["Own-use at cost", ugx(T.ownUseAtCost)],
+    ["Expenses", ugx(T.expensesTotal)],
+    ["Other income", ugx(T.otherIncomeTotal)],
     ["Litres sold", lit(T.litres)],
     ["Total sales", ugx(T.totalSales)],
     ["Cash over/short", sgn(T.cashOverShort, ugx)],
@@ -96,28 +112,29 @@ function refresh(root) {
     : '<thead><tr><th>Date</th><th>Product</th><th>Issue</th><th>Delivery</th><th>Litres sold</th><th>Day variance L</th><th>Since</th><th>Days</th><th>Cumulative variance L</th><th>Cumulative %</th></tr></thead><tbody>' +
       D.map(
         (x) =>
-          `<tr data-d="${x.d}"><td>${dmy(x.d)}</td><td>${x.label}</td><td style="text-align:left">${x.reason}</td><td>${
+          `<tr data-d="${x.trading_date}"><td>${dmy(x.trading_date)}</td><td>${PRODUCT_LABEL[x.product] || x.product}</td><td style="text-align:left">${x.reason}</td><td>${
             x.delivered ? "Yes" : "No"
-          }</td><td>${lit(x.sold)}</td><td class="${x.dayVar < 0 ? "neg" : "pos"}">${sgn(x.dayVar, lit)}</td><td>${
+          }</td><td>${lit(x.sold)}</td><td class="${x.day_var < 0 ? "neg" : "pos"}">${sgn(x.day_var, lit)}</td><td>${
             x.since ? dmy(x.since) : "—"
-          }</td><td>${x.days || "—"}</td><td class="${x.cumVar < 0 ? "neg" : x.cumVar > 0 ? "pos" : ""}">${
-            x.cumVar == null ? "—" : sgn(x.cumVar, lit)
-          }</td><td>${x.cumPct == null ? "—" : x.cumPct.toFixed(2) + "%"}</td></tr>`
+          }</td><td>${x.days || "—"}</td><td class="${x.cum_var < 0 ? "neg" : x.cum_var > 0 ? "pos" : ""}">${
+            x.cum_var == null ? "—" : sgn(x.cum_var, lit)
+          }</td><td>${x.cum_pct == null ? "—" : Number(x.cum_pct).toFixed(2) + "%"}</td></tr>`
       ).join("") +
       "</tbody>";
 
   if (!rows.length) {
     $(root, "rtable").innerHTML = '<tbody><tr><td class="empty">No entries in this period. Save a daily entry to see it here.</td></tr></tbody>';
+    root._exportState = null;
     return;
   }
   let h = "<thead><tr>" + COLS.map((c) => `<th>${c}</th>`).join("") + "</tr></thead><tbody>";
-  rows.forEach(({ d, r }) => {
-    h += `<tr data-d="${d}" tabindex="0">` + rowVals(d, r).map((v, i) => `<td>${cell(v, i)}</td>`).join("") + "</tr>";
+  rows.forEach((row) => {
+    h += `<tr data-d="${row.trading_date}" tabindex="0">` + rowVals(row).map((v, i) => `<td>${cell(v, i)}</td>`).join("") + "</tr>";
   });
-  h += "</tbody><tfoot><tr>" + totVals(T).map((v, i) => `<td>${cell(v, i)}</td>`).join("") + "</tr></tfoot>";
+  h += "</tbody><tfoot><tr>" + totVals(T).map((v, i) => `<td>${i === 0 ? "Total" : cell(v, i)}</td>`).join("") + "</tr></tfoot>";
   $(root, "rtable").innerHTML = h;
 
-  root._exportState = { rows, settings, from, to };
+  root._exportState = { rows, discrepancies: D, from, to };
 }
 
 function build(root) {
@@ -191,11 +208,13 @@ function build(root) {
 
   $(root, "xlsxBtn").addEventListener("click", () => {
     const s = root._exportState;
-    if (s) exportXlsx(s.rows, s.settings, s.from, s.to);
+    if (s) exportXlsx(s.rows, s.discrepancies, getState().settings, s.from, s.to);
+    else toast("No report loaded yet.");
   });
   $(root, "pdfBtn").addEventListener("click", () => {
     const s = root._exportState;
-    if (s) exportPdf(s.rows, s.settings, s.from, s.to);
+    if (s) exportPdf(s.rows, s.discrepancies, getState().settings, s.from, s.to);
+    else toast("No report loaded yet.");
   });
 }
 
