@@ -3,6 +3,26 @@
 Status: **DRAFT — awaiting approval.** Nothing in Phase 1 or Phase 2 starts until
 this is signed off, per the phasing in the brief.
 
+### 0. v2 isolation from the live app
+All work on this plan happens on the **`v2`** git branch (pushed from
+`main` at `8db58ff`, the commit that carries this file). `main` stays
+exactly where it is — the station's daily app keeps running from it,
+deployed to its existing production Vercel URL, completely unaffected by
+anything that happens on `v2` until a deliberate merge.
+
+`v2` pushes get their own Vercel **preview** deployment, at a different URL
+from production, auto-created by Vercel's GitHub integration — nothing to
+configure. All Phase 1/2 migrations run against the **same** Supabase
+project as today (not a second one): this is safe specifically because of
+ground rule 1 (additive only) — every new table/column is inert to `main`'s
+deployed code, since that code never queries anything this plan adds. The
+one place this plan touches an *existing* RLS policy (§2.2, `daily_entries`/
+`price_sets` SELECT, once manager/cashier roles exist) will be written so
+the predicate evaluates identically to today for `admin`/`entry`/`viewer` —
+new conditions only add access for the new roles, they don't remove or
+narrow what today's roles already have. So even on the shared database,
+`main`'s users see zero behaviour change, now or after merge.
+
 ---
 
 ## 1. Current state (as of this plan, HEAD `af3f3e1`)
@@ -98,14 +118,16 @@ describe manager and cashier as writing to *separate forms* — and (b) only
 where a read-only derived figure (like the manager's read-only pump price)
 needs to come from a table a director also writes.
 
-**This also forces a change to today's `daily_entries`/`price_sets` SELECT
-policies**, which currently grant any active profile the full row. That
-policy predates manager/cashier existing and was never wrong for the
-roles it was written for, but it cannot stay as-is once those roles exist —
-noting this as the one non-additive change this plan makes to existing
-RLS (a policy isn't stored history, so narrowing it loses nothing on disk,
-but it is a behaviour change for the current `entry`/`viewer` roles, who
-keep exactly the access they have today under the new policy).
+**This also forces a rewrite of today's `daily_entries`/`price_sets` SELECT
+policies**, which currently grant any active profile the full row — that
+blanket grant is correct for `admin`/`entry`/`viewer` but wrong the moment
+`manager`/`cashier` exist. The rewritten policy is `is_admin() OR
+(current_role_name() IN ('entry','viewer') AND is_active_profile()) OR
+(<new, narrower condition for manager/cashier>)` — the first two arms are
+exactly today's check, so `admin`/`entry`/`viewer` get identical access
+before and after; only the third arm is new. This is the one existing
+policy this plan rewrites rather than only adding to, but it's
+behaviour-preserving for every role that exists today.
 
 ### 2.3 Repeatable rows need child tables; `daily_entries` stays the backbone
 Deliveries (5.4.C), credit/prepaid draws (5.4.F/5.5.C/D), structured
