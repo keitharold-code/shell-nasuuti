@@ -3,7 +3,7 @@ import { num, has, ugx, lit, sgn, iso, addDays, dmy, daysBetween } from "../lib/
 import { kv } from "../lib/render-helpers.js";
 import { getState, isAdmin, canWrite } from "../lib/store.js";
 import {
-  saveEntry, deleteEntry, fetchDayReport,
+  saveEntry, deleteEntry, fetchDayReport, refreshEntry,
   listDeliveries, addDelivery, deleteDelivery,
   listExpenses, addExpense, deleteExpense,
   listOtherOwnUse, addOtherOwnUse, deleteOtherOwnUse,
@@ -50,8 +50,7 @@ let otherIncome = [];
 let creditPrepaidDraws = [];
 let recoveries = [];
 let prepaidDeposits = [];
-let customers = []; // loaded once per page build, not per date
-let customersLoaded = false;
+let customers = []; // refetched on each buildForm(), not per date
 
 function $(root, id) {
   return root.querySelector("#" + id);
@@ -314,8 +313,15 @@ function buildForm(root) {
   $(root, "date").value = addDays(iso(new Date()), -1);
   loadedDate = null;
 
+  // This listener is attached to #tabContent, which every page reuses by
+  // replacing its innerHTML rather than being remounted — it is never
+  // removed on tab switch, so it stays live for the Admin/Reports/Audit
+  // markup too unless it checks it's still looking at entry.js's own DOM
+  // (confirmed live: typing in Admin after visiting Entry threw "Cannot
+  // read properties of null" from readForm() reaching for a #date that
+  // Admin's HTML doesn't have).
   root.addEventListener("input", (e) => {
-    if (e.target.id !== "date") {
+    if (root.dataset.activePage === "entry" && e.target.id !== "date") {
       dirty = true;
       renderCalc(root);
     }
@@ -409,13 +415,16 @@ function updateTxnFormVisibility(root) {
 }
 
 async function loadCustomers(root) {
-  if (customersLoaded) return;
+  // Refetched every time this page is (re)built, not cached for the
+  // session — a customer added in Admin must show up in this dropdown the
+  // next time someone lands back on Daily Entry, not only after a full
+  // page reload. buildForm() only calls this on an actual tab (re)visit,
+  // not on every render, so this stays cheap.
   try {
     customers = await listCustomers();
   } catch (err) {
     customers = [];
   }
-  customersLoaded = true;
   renderCustomerOptions(root);
 }
 
@@ -742,9 +751,11 @@ async function onAddDelivery(root) {
     ["dv-litres", "dv-dipbefore", "dv-dipafter", "dv-soldduring", "dv-truck", "dv-invoice"].forEach((id) => ($(root, id).value = ""));
     toast("Delivery added.");
     await refreshChildTables(root, date);
-    const { entries } = getState();
-    // deliv_pms/ago/vp is trigger-synced server-side; reload to pick it up.
-    if (entries[date]) fillForm(root, entries[date]);
+    // deliv_pms/ago/vp is trigger-synced server-side — refetch this one
+    // row directly rather than waiting on the Realtime subscription to
+    // catch the trigger's own daily_entries UPDATE (unbounded race).
+    const updated = await refreshEntry(date);
+    if (updated) fillForm(root, updated);
     renderCalc(root);
     refreshSavedReport(root, date);
   } catch (err) {
@@ -758,8 +769,8 @@ async function onDeleteDelivery(root, id) {
   try {
     await deleteDelivery(id);
     await refreshChildTables(root, date);
-    const { entries } = getState();
-    if (entries[date]) fillForm(root, entries[date]);
+    const updated = await refreshEntry(date);
+    if (updated) fillForm(root, updated);
     renderCalc(root);
     refreshSavedReport(root, date);
   } catch (err) {
@@ -798,8 +809,8 @@ async function onAddExpense(root) {
     ["ex-gross", "ex-amount", "ex-desc"].forEach((id) => ($(root, id).value = ""));
     toast("Expense added.");
     await refreshChildTables(root, date);
-    const { entries } = getState();
-    if (entries[date]) fillForm(root, entries[date]);
+    const updated = await refreshEntry(date);
+    if (updated) fillForm(root, updated);
     renderCalc(root);
     refreshSavedReport(root, date);
   } catch (err) {
@@ -813,8 +824,8 @@ async function onDeleteExpense(root, id) {
   try {
     await deleteExpense(id);
     await refreshChildTables(root, date);
-    const { entries } = getState();
-    if (entries[date]) fillForm(root, entries[date]);
+    const updated = await refreshEntry(date);
+    if (updated) fillForm(root, updated);
     renderCalc(root);
     refreshSavedReport(root, date);
   } catch (err) {

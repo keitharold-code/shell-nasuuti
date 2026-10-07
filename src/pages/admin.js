@@ -365,6 +365,14 @@ function build(root) {
 
   loadUsers(root);
   loadPhase1Data(root);
+  // build() never populated priceTable/marginTable/etc. itself — until now
+  // it relied on refresh() running later, triggered by whatever Supabase
+  // Realtime event happened to fire next. That's usually fast enough to be
+  // invisible, but "the price table is blank until something unrelated
+  // changes" is exactly the kind of bug that stays hidden until the one
+  // time it doesn't (Realtime briefly down, a slow network) and a director
+  // can't see current prices. Populate it immediately instead.
+  refresh(root);
 }
 
 function refresh(root) {

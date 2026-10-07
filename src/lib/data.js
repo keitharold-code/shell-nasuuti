@@ -207,6 +207,25 @@ export async function deleteEntry(date) {
   await reloadAll();
 }
 
+// Deliveries and expense_entries write daily_entries.deliv_*/expenses via a
+// server-side trigger (0014/0016), not through saveEntry — so after adding
+// or removing one of those child rows, the global entries store is stale
+// until something refetches it. Waiting on the Realtime subscription to
+// catch the trigger's own daily_entries UPDATE works eventually, but it's
+// a race with no bound on it (confirmed live: the read-only Delivered
+// field stayed blank well past 10s after a delivery insert). This fetches
+// and patches just the one row directly instead, deterministically.
+export async function refreshEntry(date) {
+  const { data, error } = await supabase.from("daily_entries").select("*").eq("trading_date", date).maybeSingle();
+  if (error) throw error;
+  const { entries } = getState();
+  const next = { ...entries };
+  if (data) next[date] = rowToEntry(data);
+  else delete next[date];
+  setState({ entries: next, dates: Object.keys(next).sort() });
+  return next[date] || null;
+}
+
 export async function addPriceSet(p) {
   const row = priceSetToRow(p);
   const { error } = await supabase.from("price_sets").upsert(row, { onConflict: "effective_from" });
