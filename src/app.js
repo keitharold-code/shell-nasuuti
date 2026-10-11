@@ -102,10 +102,24 @@ function renderTab(root, tab) {
     location.hash = "#entry";
     return;
   }
+  syncNavSelection(root, tab);
   if (tab === "entry") renderEntry(content);
   else if (tab === "reports") renderReports(content);
   else if (tab === "admin") renderAdmin(content);
   else if (tab === "audit") renderAudit(content);
+}
+
+// The yellow active-tab highlight is driven by aria-selected (see
+// style.css's nav.tabs button[aria-selected="true"]). A tab click only
+// ever fires hashchange -> renderTab(), which swaps #tabContent - it never
+// touched the nav buttons, so the highlight only moved on some unrelated
+// state change (the subscribe() callback below rebuilding the whole nav).
+// Keeping it in sync is cheap, so do it on every renderTab() call instead
+// of relying on that to eventually catch up.
+function syncNavSelection(root, tab) {
+  root.querySelectorAll("nav.tabs button[data-tab]").forEach((b) => {
+    b.setAttribute("aria-selected", String(b.dataset.tab === tab));
+  });
 }
 
 subscribe(() => {
