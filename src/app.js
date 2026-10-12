@@ -1,25 +1,61 @@
-import { getState, subscribe, isAdmin } from "./lib/store.js";
+import { getState, subscribe, isAdmin, isManager, isCashier } from "./lib/store.js";
 import { signOut } from "./lib/session.js";
 import { initData, teardownData } from "./lib/data.js";
 import { renderEntry } from "./pages/entry.js";
 import { renderReports } from "./pages/reports.js";
 import { renderAdmin } from "./pages/admin.js";
 import { renderAudit } from "./pages/audit.js";
+import { renderManager } from "./pages/manager.js";
+import { renderCashier } from "./pages/cashier.js";
+import { renderRecords } from "./pages/records.js";
 
+// Manager/cashier are role-exclusive: the Records workflow is their
+// whole job, so they see only their one tab, not Phase 1's admin/entry/
+// viewer tabs (which RLS already blocks them from reading anyway —
+// this just keeps the nav honest about that rather than showing a tab
+// that would load empty).
 const TABS = [
-  { id: "entry", label: "Daily entry" },
-  { id: "reports", label: "Reports" },
-  { id: "admin", label: "Admin", adminOnly: true },
-  { id: "audit", label: "Audit log", adminOnly: true },
+  { id: "entry", label: "Daily entry", roles: ["admin", "entry", "viewer"] },
+  { id: "reports", label: "Reports", roles: ["admin", "entry", "viewer"] },
+  { id: "records", label: "Records", roles: ["admin"] },
+  { id: "admin", label: "Admin", roles: ["admin"] },
+  { id: "audit", label: "Audit log", roles: ["admin"] },
+  { id: "manager", label: "Daily Operations", roles: ["manager"] },
+  { id: "cashier", label: "Daily Money", roles: ["cashier"] },
 ];
 
+function visibleTabs() {
+  const role = getState().profile?.role;
+  return TABS.filter((t) => t.roles.includes(role));
+}
+
+function defaultTabFor() {
+  const v = visibleTabs();
+  return v[0]?.id || "entry";
+}
+
 function currentTab() {
-  const h = (location.hash || "#entry").replace("#", "");
-  return TABS.some((t) => t.id === h) ? h : "entry";
+  const h = (location.hash || "").replace("#", "");
+  const allowed = visibleTabs();
+  return allowed.some((t) => t.id === h) ? h : defaultTabFor();
+}
+
+// Phase 1's global data store (daily_entries/price_sets/settings) is
+// RLS-closed to manager/cashier (0019) — initData() would just fetch
+// nothing useful for them, and the "no prices set" notice below is about
+// a Phase 1 concern they have no tab for. Both are skipped for those two
+// roles rather than shown wrong or empty.
+function usesPhase1Store() {
+  return !isManager() && !isCashier();
 }
 
 function noticeHtml() {
   const s = getState();
+  if (!usesPhase1Store()) {
+    return s.profile && !s.profile.is_active
+      ? '<div class="notice err">Your account is deactivated. Contact a director.</div>'
+      : "";
+  }
   let h = "";
   if (!s.dbReady && !s.connectionError) {
     h += '<div class="notice">Connecting to station records…</div>';
@@ -56,7 +92,7 @@ export function mountApp(root) {
           <p class="who">${s.profile ? s.profile.full_name + " · " + s.profile.role : ""}</p>
         </div>
         <nav class="tabs" role="tablist">
-          ${TABS.filter((t) => !t.adminOnly || isAdmin())
+          ${visibleTabs()
             .map(
               (t) =>
                 `<button role="tab" aria-selected="${t.id === tab}" data-tab="${t.id}">${t.label}</button>`
@@ -87,19 +123,15 @@ export function mountApp(root) {
   if (!mounted) {
     mounted = true;
     window.addEventListener("hashchange", () => renderTab(root, currentTab()));
-    initData();
+    if (usesPhase1Store()) initData();
   }
 }
 
 function renderTab(root, tab) {
   const content = root.querySelector("#tabContent");
   if (!content) return;
-  if (tab === "admin" && !isAdmin()) {
-    location.hash = "#entry";
-    return;
-  }
-  if (tab === "audit" && !isAdmin()) {
-    location.hash = "#entry";
+  if (!visibleTabs().some((t) => t.id === tab)) {
+    location.hash = "#" + defaultTabFor();
     return;
   }
   syncNavSelection(root, tab);
@@ -107,6 +139,9 @@ function renderTab(root, tab) {
   else if (tab === "reports") renderReports(content);
   else if (tab === "admin") renderAdmin(content);
   else if (tab === "audit") renderAudit(content);
+  else if (tab === "records") renderRecords(content);
+  else if (tab === "manager") renderManager(content);
+  else if (tab === "cashier") renderCashier(content);
 }
 
 // The yellow active-tab highlight is driven by aria-selected (see
@@ -134,7 +169,7 @@ subscribe(() => {
   if (nav) {
     const tab = currentTab();
     nav.innerHTML =
-      TABS.filter((t) => !t.adminOnly || isAdmin())
+      visibleTabs()
         .map((t) => `<button role="tab" aria-selected="${t.id === tab}" data-tab="${t.id}">${t.label}</button>`)
         .join("") + '<button class="signout" data-signout="1">Sign out</button>';
     nav.querySelectorAll("button[data-tab]").forEach((b) =>

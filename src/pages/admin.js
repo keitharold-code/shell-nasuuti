@@ -11,6 +11,7 @@ import {
   listDeliveryShortfalls, listVivoClaims, listShortageRefunds, fileVivoClaim, updateVivoClaim,
 } from "../lib/data.js";
 import { listProfiles, setUserRole, inviteUser, setUserActive } from "../lib/adminUsers.js";
+import { fetchRecordsSettings, saveRecordsSettings, listStandins, assignStandin, removeStandin } from "../lib/records.js";
 import { toast } from "../lib/toast.js";
 
 const PRODUCT_LABEL = Object.fromEntries(PRODUCTS.map((p) => [p.k, p.label]));
@@ -21,6 +22,9 @@ let customers = [];
 let shortfalls = [];
 let vivoClaims = [];
 let shortageRefunds = [];
+let recordsSettings = null;
+let standins = [];
+let profilesForStandins = [];
 
 function $(root, id) {
   return root.querySelector("#" + id);
@@ -149,6 +153,8 @@ function userRowHtml(u, isSelf) {
           <option value="admin" ${u.role === "admin" ? "selected" : ""}>admin</option>
           <option value="entry" ${u.role === "entry" ? "selected" : ""}>entry</option>
           <option value="viewer" ${u.role === "viewer" ? "selected" : ""}>viewer</option>
+          <option value="manager" ${u.role === "manager" ? "selected" : ""}>manager</option>
+          <option value="cashier" ${u.role === "cashier" ? "selected" : ""}>cashier</option>
         </select>
         <button class="btn ${u.is_active ? "danger" : ""}" data-toggle="${u.id}" data-active="${u.is_active}" ${
     isSelf ? "disabled" : ""
@@ -280,6 +286,28 @@ function build(root) {
     </section>
 
     <section class="block">
+      <h2>Records settings</h2>
+      <div class="admin-grid">
+        <label class="f">Manager deadline (next-day)<input type="time" id="rs-mgrDeadline"></label>
+        <label class="f">Cashier deadline (next-day)<input type="time" id="rs-cshDeadline"></label>
+        <label class="f">Records go-live date<input type="date" id="rs-goLive"></label>
+      </div>
+      <button class="btn primary" id="saveRecordsSettingsBtn">Save Records settings</button>
+      <p class="hint">Before the go-live date, the existing cash check keeps running unchanged. From that date on, Section 3's Expected cash/Over(Short)/Not banked take over for every approved day.</p>
+    </section>
+
+    <section class="block">
+      <h2>Stand-ins <small>cover for a manager or cashier on a specific date</small></h2>
+      <div class="tscroll" style="margin-bottom:14px"><table id="standinsTable"></table></div>
+      <div class="admin-grid">
+        <label class="f">Date<input type="date" id="si-date"></label>
+        <label class="f">Role<select id="si-role"><option value="manager">manager</option><option value="cashier">cashier</option></select></label>
+        <label class="f">Stand-in<select id="si-user"></select></label>
+      </div>
+      <button class="btn primary" id="addStandinBtn">Assign stand-in</button>
+    </section>
+
+    <section class="block">
       <h2>Users</h2>
       <div id="userList"></div>
       <h2 style="font-size:17px;margin-top:18px">Invite a user</h2>
@@ -291,6 +319,8 @@ function build(root) {
             <option value="entry" selected>entry</option>
             <option value="admin">admin</option>
             <option value="viewer">viewer</option>
+            <option value="manager">manager</option>
+            <option value="cashier">cashier</option>
           </select>
         </label>
       </div>
@@ -353,6 +383,13 @@ function build(root) {
     if (b) onToggleCustomer(root, b.dataset.togglecust, b.dataset.active === "true");
   });
 
+  $(root, "saveRecordsSettingsBtn").addEventListener("click", () => onSaveRecordsSettings(root));
+  $(root, "addStandinBtn").addEventListener("click", () => onAddStandin(root));
+  $(root, "standinsTable").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-delstandin]");
+    if (b) onRemoveStandin(root, Number(b.dataset.delstandin));
+  });
+
   $(root, "inviteBtn").addEventListener("click", () => onInvite(root));
   $(root, "userList").addEventListener("change", (e) => {
     const sel = e.target.closest("[data-role]");
@@ -365,6 +402,7 @@ function build(root) {
 
   loadUsers(root);
   loadPhase1Data(root);
+  loadRecordsAdmin(root);
   // build() never populated priceTable/marginTable/etc. itself — until now
   // it relied on refresh() running later, triggered by whatever Supabase
   // Realtime event happened to fire next. That's usually fast enough to be
@@ -598,6 +636,80 @@ async function onToggleCustomer(root, id, currentlyActive) {
     await loadPhase1Data(root);
   } catch (err) {
     toast("Couldn't update customer: " + (err.message || ""));
+  }
+}
+
+function standinsTableHtml() {
+  if (!standins.length) return '<tbody><tr><td class="empty">No stand-ins assigned.</td></tr></tbody>';
+  let h = "<thead><tr><th>Date</th><th>Role</th><th>Stand-in</th><th></th></tr></thead><tbody>";
+  standins.forEach((s) => {
+    h += `<tr><td>${dmy(s.trading_date)}</td><td>${s.role}</td><td>${s.profiles?.full_name || s.standin_user_id}</td><td><button class="btn danger" data-delstandin="${s.id}" style="padding:4px 10px">Remove</button></td></tr>`;
+  });
+  return h + "</tbody>";
+}
+
+async function loadRecordsAdmin(root) {
+  try {
+    [recordsSettings, standins, profilesForStandins] = await Promise.all([
+      fetchRecordsSettings(),
+      listStandins(iso(new Date())),
+      listProfiles(),
+    ]);
+  } catch (err) {
+    toast("Couldn't load Records settings: " + (err.message || ""));
+    return;
+  }
+  const active = document.activeElement;
+  if (!(root.contains(active) && ["rs-mgrDeadline", "rs-cshDeadline", "rs-goLive"].includes(active.id))) {
+    $(root, "rs-mgrDeadline").value = (recordsSettings?.manager_deadline_time || "10:00").slice(0, 5);
+    $(root, "rs-cshDeadline").value = (recordsSettings?.cashier_deadline_time || "12:00").slice(0, 5);
+    $(root, "rs-goLive").value = recordsSettings?.records_go_live_date || "";
+  }
+  $(root, "standinsTable").innerHTML = standinsTableHtml();
+  $(root, "si-user").innerHTML = profilesForStandins
+    .filter((p) => p.is_active)
+    .map((p) => `<option value="${p.id}">${p.full_name} (${p.role})</option>`)
+    .join("");
+}
+
+async function onSaveRecordsSettings(root) {
+  try {
+    await saveRecordsSettings({
+      manager_deadline_time: $(root, "rs-mgrDeadline").value || "10:00",
+      cashier_deadline_time: $(root, "rs-cshDeadline").value || "12:00",
+      records_go_live_date: $(root, "rs-goLive").value || null,
+    });
+    toast("Records settings saved.");
+    loadRecordsAdmin(root);
+  } catch (err) {
+    toast("Couldn't save: " + (err.message || ""));
+  }
+}
+
+async function onAddStandin(root) {
+  const trading_date = $(root, "si-date").value;
+  const role = $(root, "si-role").value;
+  const standin_user_id = $(root, "si-user").value;
+  if (!trading_date || !standin_user_id) {
+    toast("Pick a date and a stand-in.");
+    return;
+  }
+  try {
+    await assignStandin({ trading_date, role, standin_user_id });
+    toast("Stand-in assigned.");
+    loadRecordsAdmin(root);
+  } catch (err) {
+    toast("Couldn't assign: " + (err.message || ""));
+  }
+}
+
+async function onRemoveStandin(root, id) {
+  if (!confirm("Remove this stand-in assignment?")) return;
+  try {
+    await removeStandin(id);
+    loadRecordsAdmin(root);
+  } catch (err) {
+    toast("Couldn't remove: " + (err.message || ""));
   }
 }
 

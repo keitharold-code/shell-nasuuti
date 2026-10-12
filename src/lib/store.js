@@ -37,3 +37,11 @@ export function canWrite() {
     (state.profile?.role === "admin" || state.profile?.role === "entry")
   );
 }
+
+export function isManager() {
+  return state.profile?.role === "manager" && state.profile?.is_active;
+}
+
+export function isCashier() {
+  return state.profile?.role === "cashier" && state.profile?.is_active;
+}
