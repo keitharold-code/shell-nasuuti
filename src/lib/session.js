@@ -27,7 +27,7 @@ export async function refreshSession() {
 }
 
 export function watchAuth(onChange) {
-  supabase.auth.onAuthStateChange(async (_event, session) => {
+  supabase.auth.onAuthStateChange(async (event, session) => {
     let profile = null;
     if (session) {
       try {
@@ -36,8 +36,11 @@ export function watchAuth(onChange) {
         profile = null;
       }
     }
+    // Called before setState so a caller reacting to the event (e.g. to
+    // flag a PASSWORD_RECOVERY session as needing a password screen) runs
+    // ahead of the re-render setState triggers, not after it.
+    onChange?.({ event, session, profile });
     setState({ session, profile });
-    onChange?.({ session, profile });
   });
 }
 
