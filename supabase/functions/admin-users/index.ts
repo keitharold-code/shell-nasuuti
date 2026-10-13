@@ -73,7 +73,7 @@ Deno.serve(async (req) => {
     const fullName = String(payload.full_name ?? "").trim();
     const role = String(payload.role ?? "entry");
     if (!email) return json({ error: "email is required" }, 400);
-    if (!["admin", "entry", "viewer"].includes(role)) {
+    if (!["admin", "entry", "viewer", "manager", "cashier"].includes(role)) {
       return json({ error: "invalid role" }, 400);
     }
 
