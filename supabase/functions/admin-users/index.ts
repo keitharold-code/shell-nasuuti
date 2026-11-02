@@ -77,8 +77,16 @@ Deno.serve(async (req) => {
       return json({ error: "invalid role" }, 400);
     }
 
+    // Without redirectTo, Supabase sends the user to the project's fixed
+    // Site URL regardless of which deployment the admin invited them
+    // from — e.g. an admin testing on a preview branch would invite
+    // someone straight into production, or vice versa. Origin matches
+    // how sendPasswordReset() (session.js) already targets
+    // window.location.origin for the same reason.
+    const origin = req.headers.get("origin");
     const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
       data: { full_name: fullName || email },
+      ...(origin ? { redirectTo: origin } : {}),
     });
     if (error) return json({ error: error.message }, 400);
 
